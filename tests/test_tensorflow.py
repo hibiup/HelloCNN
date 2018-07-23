@@ -26,7 +26,13 @@ class TestTensorflow(TestCase):
         # 如果过程中存在变量，就必须执行以下命令
         init = tf.initialize_all_variables()
 
-        # 运算。 Tensorflow 的 run() 函数就如同 shell，大部分指令都通过 run() 函数来执行。
+        """
+         运算。 Tensorflow 的 run() 函数就如同 shell，大部分指令都通过 run() 函数来执行。
+         因此以下过程相当于在 Tensorflow 中执行:
+         > init     -- 初始化变量空间
+         > update   -- 执行运算
+         > state    -- 察看结果
+        """
         with tf.Session() as session:
             session.run(init)                                     # 执行变量初始化
             for _ in range(3):
