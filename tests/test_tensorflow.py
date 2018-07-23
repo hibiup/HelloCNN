@@ -5,6 +5,50 @@ import numpy as np
 
 
 class TestTensorflow(TestCase):
+    """
+    Tensorflow 例子
+    """
+
+    def test_variable(self):
+        """
+        Tensorflow 的变量和常量运算
+        """
+        state = tf.Variable(100, name="counter")                  # 定义变量
+        print(id(state), state.name, state.value())                          # output: counter:0 Tensor("counter/read:0", shape=(), dtype=int32)
+        one = tf.constant(1)                                      # 常量
+        print(one)
+
+        new_value = tf.add(state, one)                            # 加法运算
+        update = tf.assign(state, new_value)                      # 赋值运算，将 new_value 赋予 state， 相当于 state = state + one
+                                                                  # Tensorflow 中的运算都是 lazy 的，因此此处并没有真的执行，
+                                                                  # 直到下面被赋予 session.run 之后.
+
+        # 如果过程中存在变量，就必须执行以下命令
+        init = tf.initialize_all_variables()
+
+        # 运算。 Tensorflow 的 run() 函数就如同 shell，大部分指令都通过 run() 函数来执行。
+        with tf.Session() as session:
+            session.run(init)                                     # 执行变量初始化
+            for _ in range(3):
+                session.run(update)                               # 执行上面定义的 assign 运算（执行两次）
+                print(id(state), session.run(state))              # Tensorflow 的取值运算也是 run()，相当于在 shell 打印出值
+                                                                  # 同时也可以看到 state 的 id 没有变化，说明 Variable 是 mutable
+
+    def test_run_with_matrix_multiply(self):
+        """
+        矩阵运算: matrix_left x marix_right
+        """
+        # 定义两个常量
+        matrix_left  = tf.constant([[3, 3]])                      # Matrix axis = x
+        matrix_right = tf.constant([[2], [2]])                    # Matrix axis = y
+
+        product = tf.matmul(matrix_left, matrix_right)            # matrix multiply = np.dot(left, right)
+
+        # 执行
+        with tf.Session() as session:
+            result = session.run(product)
+            print(result)
+
     def test_one_dimensional_equation(self):
         """
         用 Tensorflow 来预测一元一次函数（y=x*a + b）的权重和偏差值
@@ -36,25 +80,6 @@ class TestTensorflow(TestCase):
             session.run(train)
             if step % 20 == 0:                                    # 每20次输出一次当前 wight, bias 值
                 print(step, session.run(Weights), session.run(Biases))      # session.run(Weights) 返回当前值
-
-        # 停止
-        session.close()
-
-    def test_matrix_multiply(self):
-        """
-        matrix_left x marix_right
-        """
-        # 定义
-        matrix_left  = tf.constant([[3, 3]])                      # Matrix axis = x
-        matrix_right = tf.constant([[2], [2]])                    # Matrix axis = y
-
-        product = tf.matmul(matrix_left, matrix_right)            # matrix multiply = np.dot(left, right)
-
-        # 执行
-        session = tf.Session()
-        result = session.run(product)
-
-        print(result)
 
         # 停止
         session.close()
