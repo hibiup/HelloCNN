@@ -34,5 +34,27 @@ class TestTensorflow(TestCase):
         # 4) s开始训练
         for step in range(201):                                   # 训练若干次
             session.run(train)
-            if step %20 == 0:                                     # 每20次输出一次当前 wight, bias 值
+            if step % 20 == 0:                                    # 每20次输出一次当前 wight, bias 值
                 print(step, session.run(Weights), session.run(Biases))      # session.run(Weights) 返回当前值
+
+        # 停止
+        session.close()
+
+    def test_matrix_multiply(self):
+        """
+        matrix_left x marix_right
+        """
+        # 定义
+        matrix_left  = tf.constant([[3, 3]])                      # Matrix axis = x
+        matrix_right = tf.constant([[2], [2]])                    # Matrix axis = y
+
+        product = tf.matmul(matrix_left, matrix_right)            # matrix multiply = np.dot(left, right)
+
+        # 执行
+        session = tf.Session()
+        result = session.run(product)
+
+        print(result)
+
+        # 停止
+        session.close()
