@@ -4,6 +4,59 @@ import tensorflow as tf
 import numpy as np
 
 
+# 添加一个 activation 神经层
+def add_layer(inputs, in_size, out_size, activation_func=None, name='Layer', summarizer=None):
+    """
+    :param inputs:             输入的数据集
+    :param in_size:            输入的神经点（对应输入数据集中每条记录的大小）
+    :param out_size:           输出结果的尺寸
+    :param activation_func:    激励函数
+    :param name:
+    :param summarizer:
+    :return:
+    """
+    with tf.name_scope(name):
+        with tf.name_scope('Weights'):
+            weights = tf.Variable(tf.random_normal([in_size, out_size]))   # 生成随机矩阵(层) shape = in_size x out_size
+            if summarizer is not None: summarizer.histogram('Weights', weights)                       # Display in 'HISTOGRAM' and 'DISTRIBUTIONS'
+
+        with tf.name_scope('Biases'):
+            biases = tf.Variable(tf.zeros([1, out_size]) + 0.1)            # 数组  shape = 1 x out_size，推荐初始值不为0，因此 + 0.1
+            if summarizer is not None: summarizer.histogram('Biases', biases)
+
+        with tf.name_scope('Predict'):
+            predict = tf.add(tf.matmul(inputs, weights), biases)           # 层运算（线形）
+
+        outputs = predict if activation_func is None else activation_func(predict)  # 如果指定了 activation，则激励运算结果
+        if summarizer is not None: summarizer.histogram('Outputs', outputs)
+    return outputs
+
+
+def compute_accuracy(session, predict, test_feed_dict):
+    y_verify = session.run(predict, feed_dict=test_feed_dict)            # 尝试预测一下
+    correct_prediction = tf.equal(tf.argmax(y_verify, 1), tf.argmax(list(test_feed_dict.values())[1], 1))  # 将预测最大值与测试数据的最大值比较
+    accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))   # 得到百分比
+    result = session.run(accuracy, feed_dict=test_feed_dict)
+    return result
+
+
+def visualization(x, y, predictions):
+    import matplotlib.pyplot as plt
+    from itertools import cycle
+    col_gen = cycle('bgrcmk')
+
+    fig = plt.figure()
+    ax = fig.add_subplot(1, 1, 1)
+    ax.scatter(x, y)
+    plt.ion()
+    plt.show()
+
+    line = None
+    for pred in predictions:
+        line = ax.plot(x, pred, color=f'C{np.random.randint(1, 10)}')    # 加入每一轮的预测数据（线）
+        plt.pause(0.2)
+
+
 class TestTensorflow(TestCase):
     """
     Tensorflow 例子
@@ -124,46 +177,13 @@ class TestTensorflow(TestCase):
         https://www.tensorflow.org/api_docs/python/tf/keras/layers/Activation
         """
 
-        # 添加一个 activation 神经层
-        def add_layer(inputs, in_size, out_size, activation_func=None, name='Layer'):
-            with tf.name_scope(name):
-                with tf.name_scope('Weights'):
-                    weights = tf.Variable(tf.random_normal([in_size, out_size]))   # 生成随机矩阵(层) shape = in_size x out_size
-                    tf.summary.histogram('Weights', weights)                       # Display in 'HISTOGRAM' and 'DISTRIBUTIONS'
-
-                with tf.name_scope('Biases'):
-                    biases = tf.Variable(tf.zeros([1, out_size]) + 0.1)            # 数组  shape = 1 x out_size，推荐初始值不为0，因此 + 0.1
-                    tf.summary.histogram('Biases', biases)
-
-                with tf.name_scope('Predict'):
-                    predict = tf.add(tf.matmul(inputs, weights), biases)           # 层运算（线形）
-
-                outputs = predict if activation_func is None else activation_func(predict)  # 如果指定了 activation，则激励运算结果
-                tf.summary.histogram('Outputs', outputs)
-            return outputs
-
         def generate_test_data():
             x_data = np.linspace(-1., 1., 300, dtype=np.float32)[:, np.newaxis]  # 生成随机测试数据( feature=1, record=300)
             noise = np.random.normal(0, 0.05, x_data.shape).astype(np.float32)   # 增加 noise 只是为了使数据看上去更真实
             y_data = np.square(x_data) - 0.5 + noise          # 模拟 y 数据(大致的 x 平方关系)
             return x_data, y_data
 
-        def visualzation(x, y, predictions):
-            import matplotlib.pyplot as plt
-            from itertools import cycle
-            col_gen = cycle('bgrcmk')
-
-            fig = plt.figure()
-            ax = fig.add_subplot(1, 1, 1)
-            ax.scatter(x, y)
-            plt.ion()
-            plt.show()
-
-            line = None
-            for pred in predictions:
-                line = ax.plot(x, pred, color=f'C{np.random.randint(1, 10)}')    # 加入每一轮的预测数据（线）
-                plt.pause(0.2)
-
+        summarizer = tf.summary
 
         # 定义运算过程
         with tf.name_scope('Input'):
@@ -171,15 +191,17 @@ class TestTensorflow(TestCase):
             y_placeholder = tf.placeholder(tf.float32, shape=[None, 1], name="y_input")
 
         layer_1_output = add_layer(x_placeholder, x_placeholder.shape[1].value, 10,   # 输入节点数与原数据的 feature 相同，输出节点假设为10个
-                                   activation_func=tf.nn.relu,
-                                   name='Layer_1')
+                                   activation_func=tf.nn.relu,                        # !! test activation function: relu !!
+                                   name='Layer_1',
+                                   summarizer=summarizer)
         layer_predict = add_layer(layer_1_output, 10, y_placeholder.shape[1].value,   # 上层的输出书下层的输入，size 也相同
-                                  name='Layer_2')
+                                  name='Layer_2',
+                                  summarizer=summarizer)
 
         # 计算输出结果s和“真实”值的残差
         with tf.name_scope('Loss'):
             loss = tf.reduce_mean(tf.reduce_sum(tf.square(y_placeholder - layer_predict), reduction_indices=1))
-            tf.summary.scalar("Loss", loss)         # Display in 'SCALARS'
+            summarizer.scalar("Loss", loss)         # Display in 'SCALARS'
 
         with tf.name_scope('Train'):
             # 准备神经网络
@@ -192,8 +214,8 @@ class TestTensorflow(TestCase):
         init = tf.initialize_all_variables()
         predictions = []
         with tf.Session() as s:
-            merged = tf.summary.merge_all()
-            writer = tf.summary.FileWriter('summary', s.graph)
+            merged = summarizer.merge_all()
+            writer = summarizer.FileWriter('summary', s.graph)
 
             s.run(init)
             for i in range(1000):
@@ -206,4 +228,41 @@ class TestTensorflow(TestCase):
                     predictions.append(s.run(layer_predict, feed_dict=ph_dict))
 
             writer.flush()
-        visualzation(X, y, predictions)
+        visualization(X, y, predictions)
+
+    def test_tensorflow_classification(self):
+        """
+        用 Tensorflow 自带的数字图像数据测试分类学习
+        """
+        from tensorflow.examples.tutorials.mnist import input_data
+
+        mnist = input_data.read_data_sets("MNIST_data",   # MNIST_data 数据包如果不存在会自动下载
+                                          one_hot=True)   # one_hot 因为十个数字，因此每个在 y_label 中占一位.
+
+        # Define placeholder for input
+        x_ph = tf.placeholder(tf.float32, [None, 784])    # None：不规定数据量，784：每张图片的像数点（28 x 28）
+        y_ph = tf.placeholder(tf.float32, [None, 10])     # 因为有十个可能的数字，因此 one_hot 后会得到长度为 10 的列表
+
+        prediction = add_layer(x_ph, 784, 10,                   # 输入矩阵等于图像尺寸 784，输出 10 个分类
+                               activation_func=tf.nn.softmax)   # softmax 可以用于 classification
+
+        # loss 函数（即最优化目标函数）选用交叉熵函数。交叉熵用来衡量预测值和真实值的相似程度，如果完全相同，它们的交叉熵等于零。
+        # 是配合 softmax 计算 loss 的一种方法
+        cross_entropy = tf.reduce_mean(-tf.reduce_sum(y_ph * tf.log(prediction),    # loss
+                                                      reduction_indices=[1]))
+
+        # 使用 gradient descent 来训练模型, 最小化 loss
+        training = tf.train.GradientDescentOptimizer(0.5).minimize(cross_entropy)
+
+        # 初始化变量
+        with tf.Session() as s:
+            s.run(tf.initialize_all_variables())
+
+            accuracies = []
+            for i in range(1000):
+                x_data, y_labels = mnist.train.next_batch(100)    # 每次训练取 100 个不同的样品（而不是基于全部，这样可以加快训练速度）
+                feed_dict={x_ph: x_data, y_ph: y_labels}
+
+                s.run(training, feed_dict=feed_dict)
+                if i % 50 == 0:
+                    print(compute_accuracy(s, prediction, {x_ph: mnist.test.images, y_ph: mnist.test.labels}))
