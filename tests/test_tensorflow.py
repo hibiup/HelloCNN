@@ -102,6 +102,16 @@ class TestTensorflow(TestCase):
         # 停止
         session.close()
 
+    def test_generate_summary(self):
+        """
+        Instead with: python -m tensorboard.main --logdir=summary --host=0.0.0.0 --port=6006
+        """
+        #import runpy
+        #runpy.run_module("tensorboard.main")
+
+        from tensorboard import main
+        main.main()
+
     def test_activation_function(self):
         """
         激励函数: https://morvanzhou.github.io/tutorials/machine-learning/tensorflow/2-6-A-activation-function/
@@ -115,13 +125,21 @@ class TestTensorflow(TestCase):
         """
 
         # 添加一个 activation 神经层
-        def add_layer(inputs, in_size, out_size, activation_func=None):
-            weights = tf.Variable(tf.random_normal([in_size, out_size]))   # 生成随机矩阵(层) shape = in_size x out_size
-            biases = tf.Variable(tf.zeros([1, out_size]) + 0.1)            # 数组  shape = 1 x out_size，推荐初始值不为0，因此 + 0.1
+        def add_layer(inputs, in_size, out_size, activation_func=None, name='Layer'):
+            with tf.name_scope(name):
+                with tf.name_scope('Weights'):
+                    weights = tf.Variable(tf.random_normal([in_size, out_size]))   # 生成随机矩阵(层) shape = in_size x out_size
+                    tf.summary.histogram('Weights', weights)                       # Display in 'HISTOGRAM' and 'DISTRIBUTIONS'
 
-            predict = tf.matmul(inputs, weights) + biases                 # 层运算（线形）
-            outputs = predict if activation_func is None else activation_func(predict)  # 如果指定了 activation，则激励运算结果
+                with tf.name_scope('Biases'):
+                    biases = tf.Variable(tf.zeros([1, out_size]) + 0.1)            # 数组  shape = 1 x out_size，推荐初始值不为0，因此 + 0.1
+                    tf.summary.histogram('Biases', biases)
 
+                with tf.name_scope('Predict'):
+                    predict = tf.add(tf.matmul(inputs, weights), biases)           # 层运算（线形）
+
+                outputs = predict if activation_func is None else activation_func(predict)  # 如果指定了 activation，则激励运算结果
+                tf.summary.histogram('Outputs', outputs)
             return outputs
 
         def generate_test_data():
@@ -130,28 +148,62 @@ class TestTensorflow(TestCase):
             y_data = np.square(x_data) - 0.5 + noise          # 模拟 y 数据(大致的 x 平方关系)
             return x_data, y_data
 
-        # 定义运算过程
-        x_placeholder = tf.placeholder(tf.float32, shape=[None, 1])
-        y_placeholder = tf.placeholder(tf.float32, shape=[None, 1])
+        def visualzation(x, y, predictions):
+            import matplotlib.pyplot as plt
+            from itertools import cycle
+            col_gen = cycle('bgrcmk')
 
-        layer_1_output = add_layer(x_placeholder, x_placeholder.shape[1].value, 10,  # 输入节点数与原数据的 feature 相同，输出节点假设为10个
-                                   activation_func=tf.nn.relu)
-        y_pred = add_layer(layer_1_output, 10, y_placeholder.shape[1].value)         # 上层的输出书下层的输入，size 也相同
+            fig = plt.figure()
+            ax = fig.add_subplot(1, 1, 1)
+            ax.scatter(x, y)
+            plt.ion()
+            plt.show()
+
+            line = None
+            for pred in predictions:
+                line = ax.plot(x, pred, color=f'C{np.random.randint(1, 10)}')    # 加入每一轮的预测数据（线）
+                plt.pause(0.2)
+
+
+        # 定义运算过程
+        with tf.name_scope('Input'):
+            x_placeholder = tf.placeholder(tf.float32, shape=[None, 1], name="x_input")
+            y_placeholder = tf.placeholder(tf.float32, shape=[None, 1], name="y_input")
+
+        layer_1_output = add_layer(x_placeholder, x_placeholder.shape[1].value, 10,   # 输入节点数与原数据的 feature 相同，输出节点假设为10个
+                                   activation_func=tf.nn.relu,
+                                   name='Layer_1')
+        layer_predict = add_layer(layer_1_output, 10, y_placeholder.shape[1].value,   # 上层的输出书下层的输入，size 也相同
+                                  name='Layer_2')
 
         # 计算输出结果s和“真实”值的残差
-        loss = tf.reduce_mean(tf.reduce_sum(tf.square(y_placeholder - y_pred), reduction_indices=1))
+        with tf.name_scope('Loss'):
+            loss = tf.reduce_mean(tf.reduce_sum(tf.square(y_placeholder - layer_predict), reduction_indices=1))
+            tf.summary.scalar("Loss", loss)         # Display in 'SCALARS'
 
-        # 准备神经网络
-        optimizer = tf.train.GradientDescentOptimizer(0.1)     # Learning rate(学习效率)取值在 0 到 1 之间
-        train_step = optimizer.minimize(loss)                  # 以尽可能减小误差的方向进行训练
+        with tf.name_scope('Train'):
+            # 准备神经网络
+            optimizer = tf.train.GradientDescentOptimizer(0.1)     # Learning rate(学习效率)取值在 0 到 1 之间
+            train_step = optimizer.minimize(loss)                  # 以尽可能减小误差的方向进行训练
 
         # 运算
         X, y = generate_test_data()
         ph_dict = {x_placeholder: X, y_placeholder: y}
         init = tf.initialize_all_variables()
+        predictions = []
         with tf.Session() as s:
+            merged = tf.summary.merge_all()
+            writer = tf.summary.FileWriter('summary', s.graph)
+
             s.run(init)
             for i in range(1000):
                 s.run(train_step, feed_dict=ph_dict)
                 if i % 100 == 0:           # 每 100 步打印出结果看一下
+                    summary = s.run(merged, feed_dict=ph_dict)
+                    writer.add_summary(summary, i)
+
                     print(s.run(loss, feed_dict=ph_dict))
+                    predictions.append(s.run(layer_predict, feed_dict=ph_dict))
+
+            writer.flush()
+        visualzation(X, y, predictions)
