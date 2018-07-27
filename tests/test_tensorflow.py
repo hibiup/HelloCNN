@@ -245,13 +245,17 @@ class TestTensorflow(TestCase):
         x_ph = tf.placeholder(tf.float32, [None, 784])    # None：不规定数据量，784：每张图片的像数点（28 x 28）
         y_ph = tf.placeholder(tf.float32, [None, 10])     # 因为有十个可能的数字，因此 one_hot 后会得到长度为 10 的列表
 
+        summarizer = tf.summary
+
         prediction = add_layer(x_ph, 784, 10,                   # 输入矩阵等于图像尺寸 784，输出 10 个分类
-                               activation_func=tf.nn.softmax)   # softmax 可以用于 classification
+                               activation_func=tf.nn.softmax,   # softmax 可以用于 classification
+                               summarizer=summarizer)
 
         # loss 函数（即最优化目标函数）选用交叉熵函数。交叉熵用来衡量预测值和真实值的相似程度，如果完全相同，它们的交叉熵等于零。
         # 是配合 softmax 计算 loss 的一种方法
         cross_entropy = tf.reduce_mean(-tf.reduce_sum(y_ph * tf.log(prediction),    # loss
                                                       reduction_indices=[1]))
+        summarizer.scalar("Loss", cross_entropy)
 
         # 使用 gradient descent 来训练模型, 最小化 loss
         training = tf.train.GradientDescentOptimizer(0.5).minimize(cross_entropy)
@@ -259,14 +263,17 @@ class TestTensorflow(TestCase):
         # 初始化变量
         with tf.Session() as s:
             s.run(tf.initialize_all_variables())
+            merge = init_summerizer(s, summarizer, {"train": "summary/train", "test": "summary/test"})
 
             for i in range(1000):
                 x_data, y_labels = mnist.train.next_batch(100)    # 每次训练取 100 个不同的样品（而不是基于全部，这样可以加快训练速度）
                 feed_dict = {x_ph: x_data, y_ph: y_labels}
-
                 s.run(training, feed_dict=feed_dict)
                 if i % 50 == 0:
-                    print(compute_accuracy(s, prediction, {x_ph: mnist.test.images, y_ph: mnist.test.labels}))
+                    test_feed_dict = {x_ph: mnist.test.images, y_ph: mnist.test.labels}
+                    merge("train", i, feed_dict=feed_dict)
+                    merge("test", i, feed_dict=test_feed_dict)
+                    # print(compute_accuracy(s, prediction, test_feed_dict))  # 打印出预测准确率
 
     def test_dropout_fix_overfitting(self):
         from sklearn.datasets import load_digits    # digits 是手写数字图片数据集（Bunch），包含 8*8 像素的图像集和一个[0, 9]整数的标签
