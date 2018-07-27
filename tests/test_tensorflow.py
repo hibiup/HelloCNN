@@ -2,10 +2,11 @@ from unittest import TestCase
 
 import tensorflow as tf
 import numpy as np
+import matplotlib.pyplot as plt
 
 
 # 添加一个 activation 神经层
-def add_layer(inputs, in_size, out_size, activation_func=None, name='Layer', summarizer=None):
+def add_layer(inputs, in_size, out_size, activation_func=None, name='Layer', summarizer=None, keep_drop=None):
     """
     :param inputs:             输入的数据集
     :param in_size:            输入的神经点（对应输入数据集中每条记录的大小）
@@ -27,9 +28,24 @@ def add_layer(inputs, in_size, out_size, activation_func=None, name='Layer', sum
         with tf.name_scope('Predict'):
             predict = tf.add(tf.matmul(inputs, weights), biases)           # 层运算（线形）
 
+        if keep_drop is not None:
+            predict = tf.nn.dropout(predict, keep_drop)
+
         outputs = predict if activation_func is None else activation_func(predict)  # 如果指定了 activation，则激励运算结果
         if summarizer is not None: summarizer.histogram('Outputs', outputs)
     return outputs
+
+
+def init_summerizer(session, summarizer, output_paths):
+    merged = summarizer.merge_all
+    writers = {writer_id: summarizer.FileWriter(output_path, session.graph) for writer_id, output_path in output_paths.items()}
+
+    def merge_summery(writer_id, index, feed_dict):
+        nonlocal writers, merged
+        summary = session.run(merged(), feed_dict=feed_dict)
+        writers.get(writer_id).add_summary(summary, index)
+
+    return merge_summery
 
 
 def compute_accuracy(session, predict, test_feed_dict):
@@ -41,7 +57,6 @@ def compute_accuracy(session, predict, test_feed_dict):
 
 
 def visualization(x, y, predictions):
-    import matplotlib.pyplot as plt
     from itertools import cycle
     col_gen = cycle('bgrcmk')
 
@@ -155,16 +170,6 @@ class TestTensorflow(TestCase):
         # 停止
         session.close()
 
-    def test_generate_summary(self):
-        """
-        Instead with: python -m tensorboard.main --logdir=summary --host=0.0.0.0 --port=6006
-        """
-        #import runpy
-        #runpy.run_module("tensorboard.main")
-
-        from tensorboard import main
-        main.main()
-
     def test_activation_function(self):
         """
         激励函数: https://morvanzhou.github.io/tutorials/machine-learning/tensorflow/2-6-A-activation-function/
@@ -214,20 +219,17 @@ class TestTensorflow(TestCase):
         init = tf.initialize_all_variables()
         predictions = []
         with tf.Session() as s:
-            merged = summarizer.merge_all()
-            writer = summarizer.FileWriter('summary', s.graph)
+            merge = init_summerizer(s, summarizer, {"train": "summary"})
 
             s.run(init)
             for i in range(1000):
                 s.run(train_step, feed_dict=ph_dict)
                 if i % 100 == 0:           # 每 100 步打印出结果看一下
-                    summary = s.run(merged, feed_dict=ph_dict)
-                    writer.add_summary(summary, i)
+                    merge("train", i, ph_dict)
 
                     print(s.run(loss, feed_dict=ph_dict))
                     predictions.append(s.run(layer_predict, feed_dict=ph_dict))
 
-            writer.flush()
         visualization(X, y, predictions)
 
     def test_tensorflow_classification(self):
@@ -258,11 +260,64 @@ class TestTensorflow(TestCase):
         with tf.Session() as s:
             s.run(tf.initialize_all_variables())
 
-            accuracies = []
             for i in range(1000):
                 x_data, y_labels = mnist.train.next_batch(100)    # 每次训练取 100 个不同的样品（而不是基于全部，这样可以加快训练速度）
-                feed_dict={x_ph: x_data, y_ph: y_labels}
+                feed_dict = {x_ph: x_data, y_ph: y_labels}
 
                 s.run(training, feed_dict=feed_dict)
                 if i % 50 == 0:
                     print(compute_accuracy(s, prediction, {x_ph: mnist.test.images, y_ph: mnist.test.labels}))
+
+    def test_dropout_fix_overfitting(self):
+        from sklearn.datasets import load_digits    # digits 是手写数字图片数据集（Bunch），包含 8*8 像素的图像集和一个[0, 9]整数的标签
+        from sklearn.model_selection import train_test_split
+        from sklearn.preprocessing import LabelBinarizer
+
+        summarizer = tf.summary
+
+        digits = load_digits()    # 1797 个样本
+
+        # 随机获取一张图片看一下. 每张图片都是 8x8 格式的
+        # plt.imshow(digits.images[np.random.randint(1797)])
+        # plt.show()
+
+        x, y = digits.data, LabelBinarizer().fit_transform(digits.target)   # LabelBinarizer 类似 one_hot，将这1~10变成10个“BIT”，每个“BIT”表示一个值
+        x_train, x_test, y_train, y_test = train_test_split(x, y, train_size=0.7)
+
+        # 定义占位符
+        x_ph, y_ph = tf.placeholder(tf.float32, [None, 8*8]), tf.placeholder(tf.float32, [None, 10])
+
+        feed_dict = {x_ph: x_train, y_ph: y_train}
+        test_feed_dict = {x_ph: x_test, y_ph: y_test}
+
+        # 生成网络层
+        middle_number = 100
+        layer_1 = add_layer(x_ph, 8*8,                      # 输入层 64 个节点(每张图片)
+                            middle_number,                  # 中间层个数故意放大到 100 个，以制造 overfitting 的效果。
+                            activation_func=tf.nn.tanh,     # https://blog.csdn.net/brucewong0516/article/details/78834332
+                            summarizer=summarizer,
+                            keep_drop=0.5)                  # keep_drop=0.5 的意思是每次运算只随机取 50% 的数据
+                                                            # 因为我们故意生成了 100 个节点的网络来放大了拟合，可以通过 dropout 来
+                                                            # 随机忽略一些对结果造成偏执影响的节点
+        layer_prediction = add_layer(layer_1, middle_number,
+                                     10,   # 输出归类为 10 个节点(10个数字)
+                                     activation_func=tf.nn.softmax,
+                                     summarizer=summarizer,
+                                     keep_drop=0.5)
+        # Loss
+        cross_entropy = tf.reduce_mean(-tf.reduce_sum(y_ph * tf.log(layer_prediction), reduction_indices=[1]))
+        summarizer.scalar("Loss", cross_entropy)
+
+        # 定义 Train 算法
+        training = tf.train.GradientDescentOptimizer(0.4).minimize(cross_entropy)
+
+        # 开始训练
+        with tf.Session() as s:
+            s.run(tf.initialize_all_variables())
+            merge = init_summerizer(s, summarizer, {"train": "summary/train", "test": "summary/test"})
+
+            for i in range(1000):
+                s.run(training, feed_dict=feed_dict)      # 训练的时候只使用 50% 的节点
+                if i % 50 == 0:
+                    merge("train", i, feed_dict=feed_dict)  # 输出给 tensorboard 仍然是 100% 的信息
+                    merge("test", i, feed_dict=test_feed_dict)
