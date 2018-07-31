@@ -264,6 +264,10 @@ class TestTensorflow(TestCase):
         with tf.Session() as s:
             s.run(tf.initialize_all_variables())
             merge = init_summerizer(s, summarizer, {"train": "summary/train", "test": "summary/test"})
+            #merged = tf.summary.merge_all()
+            #writer = tf.summary.FileWriter('summary/train', s.graph)
+            #test_writer = tf.summary.FileWriter('summary/test', s.graph)
+
 
             for i in range(1000):
                 x_data, y_labels = mnist.train.next_batch(100)    # 每次训练取 100 个不同的样品（而不是基于全部，这样可以加快训练速度）
@@ -271,9 +275,15 @@ class TestTensorflow(TestCase):
                 s.run(training, feed_dict=feed_dict)
                 if i % 50 == 0:
                     test_feed_dict = {x_ph: mnist.test.images, y_ph: mnist.test.labels}
+
                     merge("train", i, feed_dict=feed_dict)
                     merge("test", i, feed_dict=test_feed_dict)
-                    # print(compute_accuracy(s, prediction, test_feed_dict))  # 打印出预测准确率
+                    #summary = s.run(merged, feed_dict=feed_dict)
+                    #writer.add_summary(summary, i)
+                    #test_summary = s.run(merged, feed_dict=test_feed_dict)
+                    #test_writer.add_summary(test_summary, i)
+
+                    print(compute_accuracy(s, prediction, test_feed_dict))  # 打印出预测准确率
 
     def test_dropout_fix_overfitting(self):
         from sklearn.datasets import load_digits    # digits 是手写数字图片数据集（Bunch），包含 8*8 像素的图像集和一个[0, 9]整数的标签
